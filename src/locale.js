@@ -78,19 +78,86 @@ function option(data) {
     return data instanceof Array ? data[0] : data;
 }
 
+// debug utilities
+
+var IS_TRACE = false;
+
+function verbose(msg) {
+    IS_TRACE ? console.trace(msg) : console.log(msg);
+}
+
 // Localizer /////////////////////////////////////////////////////////////
 
 function Localizer(language, dict) {
     this.language = language || 'en';
     this.dict = dict || {};
+    this.untranslated_phrases = new Map().set(
+        this.language,
+        new Map().set('new', new Set()).set('untranslated', new Set())
+    );
+}
+
+Localizer.prototype.recordUntranslatedPhrase = function (phrase) {
+    if (typeof(phrase) !== 'string') {
+        verbose(`${this.constructor.name}.recordUntranslatedPhrase: not string`);
+        return phrase;
+    } else if (/^\s*$/.test(phrase)) {
+        verbose(`${this.constructor.name}.recordUntranslatedPhrase: empty or whitespaces`);
+        return;
+    }
+
+    var current_dict = this.dict[this.language];
+    var translate_status;
+
+    switch (current_dict[phrase]) {
+    case undefined:
+        translate_status = 'new';
+        break;
+    case '':
+        translate_status = 'untranslated';
+        break;
+    default:
+        return;
+    }
+
+    if (!this.untranslated_phrases.has(this.language)) {
+        this.untranslated_phrases.set(
+            this.language,
+            new Map().set('new', new Set()).set('untranslated', new Set())
+        );
+    }
+
+    var record = this.untranslated_phrases.get(this.language);
+
+    if (!(record.has(translate_status) ||
+          typeof(record?.get(translate_status)) === 'set')) {
+        record.set(translate_status, new Set());
+    }
+
+    if (record.get(translate_status).has(phrase)) { return; }
+
+    record.get(translate_status).add(phrase);
+
+    verbose(`${this.constructor.name}.recordUntranslatedPhrase: ${translate_status} (${this.language}): ${JSON.stringify(phrase)}`);
 }
 
 Localizer.prototype.translate = function (string) {
     var phrase = this.contextualize(string);
-    return Object.prototype.hasOwnProperty.call(
-        this.dict[this.language],
+    // return Object.prototype.hasOwnProperty.call(
+    //     this.dict[this.language],
+    //     phrase
+    // ) ? this.dict[this.language][phrase] || phrase : phrase;
+    var current_dict = this.dict[this.language];
+    var isTranslated = Object.prototype.hasOwnProperty.call(
+        current_dict,
         phrase
-    ) ? this.dict[this.language][phrase] || phrase : phrase;
+    );
+
+    this.recordUntranslatedPhrase(string);
+
+    var phrase_translated = current_dict[phrase] || phrase;
+
+    return isTranslated ? phrase_translated : phrase;
 };
 
 Localizer.prototype.languages = function () {
