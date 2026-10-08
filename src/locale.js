@@ -86,15 +86,60 @@ function verbose(msg) {
     IS_TRACE ? console.trace(msg) : console.log(msg);
 }
 
+// Untranslated
+
+function Untranslated() {
+    this.stat_to_label = new Map(Object.entries({ 'undefined': 'new', '': 'untranslated' }));
+    this.labels = this.stat_to_label.values().toArray();
+    this.label_to_phrases_by_lang;
+}
+
+Untranslated.prototype.emptyLabelToPhrases = function() {
+    return new Map(this.labels.map((label) => [label, new Set()]));
+}
+
+Untranslated.prototype.fixPhrases = function(language) {
+    if (!(this.label_to_phrases_by_lang instanceof Map)) {
+        this.label_to_phrases_by_lang = new Map().set(language, this.emptyLabelToPhrases());
+        return;
+    } else if (!this.label_to_phrases_by_lang.has(language)) {
+        this.label_to_phrases_by_lang.set(language, this.emptyLabelToPhrases());
+        return;
+    }
+
+    var label_to_phrases = this.label_to_phrases_by_lang.get(language);
+
+    this.labels.forEach((label) => {
+        if (!(label_to_phrases.has(label) || (label_to_phrases?.get(label) instanceof Set))) {
+            label_to_phrases.set(label, new Set());
+        }
+    });
+
+    return;
+}
+
+Untranslated.prototype.addPhrase = function(language, stat, phrase) {
+    var label = this.stat_to_label.get(`${stat}`);
+
+    if (label === undefined) { return; }
+
+    this.fixPhrases(language);
+
+    var phrases = this.label_to_phrases_by_lang.get(language).get(label);
+
+    if (phrases.has(phrase)) { return; }
+
+    phrases.add(phrase);
+
+    verbose(`${this.constructor.name}.addPhrase: ${label} (${language}): ${phrase}`);
+}
+
 // Localizer /////////////////////////////////////////////////////////////
 
 function Localizer(language, dict) {
     this.language = language || 'en';
     this.dict = dict || {};
-    this.untranslated_phrases = new Map().set(
-        this.language,
-        new Map().set('new', new Set()).set('untranslated', new Set())
-    );
+    this.untranslated = new Untranslated(this.language);
 }
 
 Localizer.prototype.recordUntranslatedPhrase = function (phrase) {
@@ -106,39 +151,7 @@ Localizer.prototype.recordUntranslatedPhrase = function (phrase) {
         return;
     }
 
-    var current_dict = this.dict[this.language];
-    var translate_status;
-
-    switch (current_dict[phrase]) {
-    case undefined:
-        translate_status = 'new';
-        break;
-    case '':
-        translate_status = 'untranslated';
-        break;
-    default:
-        return;
-    }
-
-    if (!this.untranslated_phrases.has(this.language)) {
-        this.untranslated_phrases.set(
-            this.language,
-            new Map().set('new', new Set()).set('untranslated', new Set())
-        );
-    }
-
-    var record = this.untranslated_phrases.get(this.language);
-
-    if (!(record.has(translate_status) ||
-          typeof(record?.get(translate_status)) === 'set')) {
-        record.set(translate_status, new Set());
-    }
-
-    if (record.get(translate_status).has(phrase)) { return; }
-
-    record.get(translate_status).add(phrase);
-
-    verbose(`${this.constructor.name}.recordUntranslatedPhrase: ${translate_status} (${this.language}): ${JSON.stringify(phrase)}`);
+    this.untranslated.addPhrase(this.language, this.dict[this.language][phrase], phrase);
 }
 
 Localizer.prototype.translate = function (string) {
