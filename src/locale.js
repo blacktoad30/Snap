@@ -78,80 +78,124 @@ function option(data) {
     return data instanceof Array ? data[0] : data;
 }
 
-// debug utilities
+// Verbose
 
-var IS_TRACE = false;
+class Verbose {
+    #_configPrefix;
+    hasTrace;
 
-function verbose(msg) {
-    IS_TRACE ? console.trace(msg) : console.log(msg);
+    constructor(configPrefix, hasTrace = undefined) {
+        this.#_configPrefix = configPrefix;
+        if (hasTrace !== undefined) { this.hasTrace = Boolean(hasTrace); }
+    }
+
+    #saveConfig(key, value) {
+        if (this.#_configPrefix === undefined) {
+            console.log(`${this.constructor.name}.#saveConfig: _configPrefix is undefined`);
+            return;
+        }
+
+        localStorage[`${this.#_configPrefix}${key}`] = value;
+    }
+
+    get _configPrefix() {
+        return this.#_configPrefix;
+    }
+
+    getConfig(key) {
+        if (this._configPrefix === undefined) {
+            console.log(`${this.constructor.name}.getConfig: _configPrefix is undefined`);
+            return;
+        }
+
+        return localStorage[`${this._configPrefix}${key}`];
+    }
+
+    get configTrace() {
+        const conf = this.getConfig('trace');
+
+        if (conf === undefined) { return; }
+
+        return conf === 'false' ? false : true;
+    }
+
+    set configTrace(bool) {
+        this.#saveConfig('trace', Boolean(bool));
+    }
+
+    log(msg) {
+        const with_trace = this.hasTrace === undefined ? this.configTrace : this.hasTrace;
+
+        with_trace ? console.trace(msg) : console.log(msg);
+    }
+}
+
+var SnapVerbose = new Verbose('-snap-verbose-');
+
+function verbose(string) {
+    return SnapVerbose.log(string);
 }
 
 // Untranslated
 
-function Untranslated() {
-    this.stat_to_label = new Map(Object.entries({ 'undefined': 'new', '': 'untranslated' }));
-    this.labels = this.stat_to_label.values().toArray();
-    this.label_to_phrases_by_lang;
-}
+class Untranslated {
+    static #statToLabel = new Map(Object.entries({ 'undefined': 'new', '': 'untranslated' }));
+    static #labels = Untranslated.#statToLabel.values().toArray();
 
-Untranslated.prototype.emptyLabelToPhrases = function() {
-    return new Map(this.labels.map((label) => [label, new Set()]));
-}
-
-Untranslated.prototype.fixPhrases = function(language) {
-    if (!(this.label_to_phrases_by_lang instanceof Map)) {
-        this.label_to_phrases_by_lang = new Map().set(language, this.emptyLabelToPhrases());
-        return;
-    } else if (!this.label_to_phrases_by_lang.has(language)) {
-        this.label_to_phrases_by_lang.set(language, this.emptyLabelToPhrases());
-        return;
+    static #emptyLabelToPhrases() {
+        return new Map(Untranslated.#labels.map((label) => [label, new Set()]));
     }
 
-    var label_to_phrases = this.label_to_phrases_by_lang.get(language);
+    phraseStore;
 
-    this.labels.forEach((label) => {
-        if (!(label_to_phrases.has(label) || (label_to_phrases?.get(label) instanceof Set))) {
-            label_to_phrases.set(label, new Set());
+    #fixPhraseStore(language) {
+        if (!(this.phraseStore instanceof Map)) {
+            this.phraseStore = new Map().set(language, Untranslated.#emptyLabelToPhrases());
+        } else if (!this.phraseStore.has(language)) {
+            this.phraseStore.set(language, Untranslated.#emptyLabelToPhrases());
+        } else {
+            const label_to_phrases = this.phraseStore.get(language);
+
+            Untranslated.#labels.forEach((label) => {
+                if (!(label_to_phrases.has(label) || (label_to_phrases?.get(label) instanceof Set))) {
+                    label_to_phrases.set(label, new Set());
+                }
+            });
         }
-    });
+    }
 
-    return;
+    addPhrase(language, stat, phrase) {
+        if (typeof(phrase) !== 'string') {
+            verbose(`${this.constructor.name}.addPhrase: not string`);
+            return;
+        } else if (/^\s*$/.test(phrase)) {
+            verbose(`${this.constructor.name}.addPhrase: empty or whitespaces`);
+            return;
+        }
+
+        const label = Untranslated.#statToLabel.get(`${stat}`);
+
+        if (label === undefined) { return; }
+
+        this.#fixPhraseStore(language);
+
+        const phrases = this.phraseStore.get(language).get(label);
+
+        if (phrases.has(phrase)) { return; }
+
+        phrases.add(phrase);
+
+        verbose(`${this.constructor.name}.addPhrase: ${label} (${language}): ${phrase}`);
+    }
 }
 
-Untranslated.prototype.addPhrase = function(language, stat, phrase) {
-    var label = this.stat_to_label.get(`${stat}`);
-
-    if (label === undefined) { return; }
-
-    this.fixPhrases(language);
-
-    var phrases = this.label_to_phrases_by_lang.get(language).get(label);
-
-    if (phrases.has(phrase)) { return; }
-
-    phrases.add(phrase);
-
-    verbose(`${this.constructor.name}.addPhrase: ${label} (${language}): ${phrase}`);
-}
+var SnapUntranslated = new Untranslated();
 
 // Localizer /////////////////////////////////////////////////////////////
 
 function Localizer(language, dict) {
     this.language = language || 'en';
     this.dict = dict || {};
-    this.untranslated = new Untranslated(this.language);
-}
-
-Localizer.prototype.recordUntranslatedPhrase = function (phrase) {
-    if (typeof(phrase) !== 'string') {
-        verbose(`${this.constructor.name}.recordUntranslatedPhrase: not string`);
-        return phrase;
-    } else if (/^\s*$/.test(phrase)) {
-        verbose(`${this.constructor.name}.recordUntranslatedPhrase: empty or whitespaces`);
-        return;
-    }
-
-    this.untranslated.addPhrase(this.language, this.dict[this.language][phrase], phrase);
 }
 
 Localizer.prototype.translate = function (string) {
@@ -166,7 +210,7 @@ Localizer.prototype.translate = function (string) {
         phrase
     );
 
-    this.recordUntranslatedPhrase(string);
+    SnapUntranslated.addPhrase(this.language, this.dict[this.language][phrase], phrase);
 
     var phrase_translated = current_dict[phrase] || phrase;
 
